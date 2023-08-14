@@ -6,6 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <script src='https://unpkg.com/maplibre-gl/dist/maplibre-gl.js'></script>
     <link href='https://unpkg.com/maplibre-gl/dist/maplibre-gl.css' rel='stylesheet' />
+    <script src="https://unpkg.com/pmtiles@2.7.0/dist/index.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/geotiff"></script>
     <link href="maplibre-gl-compare.css" rel='stylesheet' />
     <script src="maplibre-gl-compare.js"></script>
@@ -48,7 +49,7 @@
         .map-overlay {
             font: bold 12px/20px 'Helvetica Neue', Arial, Helvetica, sans-serif;
             position: absolute;
-            width: 220px;
+            width: 250px;
             bottom: 20px;
             left: 0;
             padding: 10px;
@@ -80,18 +81,54 @@
             margin: 0;
             cursor: ew-resize;
         }
+
+        .corner-text {
+            position: fixed;
+            top: 0;
+            padding: 10px;
+            font-size: 14px;
+            z-index: 1;
+            /* put text above other elements */
+            color: white;
+            /* make sure text is visible on top of other elements */
+            background-color: rgba(0, 0, 0, 0.5);
+            /* semi-transparent background for better visibility */
+        }
+
+        #left-corner {
+            left: 0;
+        }
+
+        #right-corner {
+            right: 0;
+        }
     </style>
     <div id="comparison-container">
+        <div id="left-corner" class="corner-text">20230808T210929</div>
+        <div id="right-corner" class="corner-text">20230813T210931</div>
         <div id="before" class="map"></div>
         <div id="after" class="map"></div>
     </div>
     <div class="map-overlay top">
         <div class="map-overlay-inner">
-            <label>衛星画像(COG) 不透明度: <span id="slider-opacity-value">100%</span></label>
+            <label>衛星画像(Sentinel-2) 不透明度: <span id="slider-opacity-value">100%</span></label>
             <input id="slider-opacity" type="range" min="0" max="100" step="0" value="100">
+            <label>衛星画像(NASA-FIRMS) 不透明度: <span id="ortho-slider-opacity-value">50%</span></label>
+            <input id="ortho-slider-opacity" type="range" min="0" max="100" step="1" value="50">
         </div>
     </div>
     <script type="module">
+        let protocol = new pmtiles.Protocol();
+        maplibregl.addProtocol("pmtiles", protocol.tile);
+
+        // NASA-FIRMSラスタタイル
+        let PMTiles_URL = "https://xs489works.xsrv.jp/pmtiles-data/NASA_FIRMS/Maui_Hawaii_Fires/FIRMS_2023-08-06_2023-08-12[@-156.3,20.8,11z].pmtiles";
+
+        const p = new pmtiles.PMTiles(PMTiles_URL)
+        p.getMetadata().then((res) => console.log(res));
+
+        protocol.add(p);
+
         // 'GeoTIFF'パッケージから 'fromUrl' と 'Pool' 関数をインポート
         const { fromUrl, Pool } = GeoTIFF;
 
@@ -176,8 +213,8 @@
             container: 'before',
             style: 'https://tile2.openstreetmap.jp/styles/osm-bright/style.json',
             hash: true,
-            zoom: 9.94,
-            center: [32.8052, 46.5943],
+            zoom: 10.35,
+            center: [-156.4674, 20.8128],
             pitch: 0,
             bearing: 0,
             attributionControl: false,
@@ -225,8 +262,8 @@
             container: 'after',
             style: 'https://tile2.openstreetmap.jp/styles/osm-bright/style.json',
             hash: true,
-            zoom: 9.94,
-            center: [32.8052, 46.5943],
+            zoom: 10.35,
+            center: [-156.4674, 20.8128],
             pitch: 0,
             bearing: 0,
             attributionControl: false,
@@ -261,13 +298,48 @@
                 sliderOpactiyValue.textContent = e.target.value + '%';
             });
 
+            // NASA-FIRMSラスタタイルソース
+            afterMap.addSource("pmtiles-orthophoto", {
+                type: "raster",
+                url: "pmtiles://" + PMTiles_URL,
+                attribution: '<a href="https://firms.modaps.eosdis.nasa.gov/map/">© NASA FIRMS FIRE MAP</a>'
+            });
+
+            // NASA-FIRMSラスタタイルレイヤ
+            afterMap.addLayer({
+                'id': 'pmtiles-orthophoto',
+                'type': "raster",
+                'source': 'pmtiles-orthophoto',
+                "minzoom": 1,
+                "maxzoom": 18,
+                'paint': {
+                    'raster-opacity': 0.5
+                }
+            });
+
+            // スライダーでラスタタイルの不透明度を制御
+            const orthosliderOpactiy = document.getElementById('ortho-slider-opacity');
+            const orthosliderOpactiyValue = document.getElementById('ortho-slider-opacity-value');
+
+            orthosliderOpactiy.addEventListener('input', (e) => {
+                afterMap.setPaintProperty(
+                    'pmtiles-orthophoto',
+                    'raster-opacity',
+                    parseInt(e.target.value, 10) / 100
+                );
+                orthosliderOpactiyValue.textContent = e.target.value + '%';
+            });
+
         });
 
-        // ズーム・回転
-        afterMap.addControl(new maplibregl.NavigationControl());
+        // Attributionを折りたたみ表示
+        afterMap.addControl(new maplibregl.AttributionControl({
+            compact: true,
+            customAttribution: '（<a href="https://twitter.com/syanseto" target="_blank">Twitter</a> | <a href="https://github.com/shi-works/Maui-Hawaii-Fires-Map-on-MapLibre-GL-JS" target="_blank">Github</a>） '
+        }));
 
         // フルスクリーンモードのオンオフ
-        afterMap.addControl(new maplibregl.FullscreenControl());
+        afterMap.addControl(new maplibregl.FullscreenControl(), 'bottom-right');
 
         // 現在位置表示
         afterMap.addControl(new maplibregl.GeolocateControl({
@@ -277,13 +349,10 @@
             fitBoundsOptions: { maxZoom: 18 },
             trackUserLocation: true,
             showUserLocation: true
-        }));
+        }), 'bottom-right');
 
-        // Attributionを折りたたみ表示
-        afterMap.addControl(new maplibregl.AttributionControl({
-            compact: true,
-            customAttribution: '（<a href="https://twitter.com/syanseto" target="_blank">Twitter</a> | <a href="https://github.com/shi-works/satellite-data-cog-maplibre-gl-js" target="_blank">Github</a>） '
-        }));
+        // ズーム・回転
+        afterMap.addControl(new maplibregl.NavigationControl(), 'bottom-right');
 
         var container = "#comparison-container";
         var map = new maplibregl.Compare(beforeMap, afterMap, container, {
